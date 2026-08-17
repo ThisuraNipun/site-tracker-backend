@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { verifyToken } from '../utils/jwt';
+import { verifyAccessToken } from '../utils/jwt';
 import { sendError } from '../utils/response';
 
 export interface AuthRequest extends Request {
@@ -7,7 +7,7 @@ export interface AuthRequest extends Request {
 }
 
 export const authenticate = (req: AuthRequest, res: Response, next: NextFunction): void => {
-  const token = req.cookies.token;
+  const token = req.cookies.accessToken;
 
   if (!token) {
     sendError(res, 401, 'No token provided');
@@ -15,7 +15,7 @@ export const authenticate = (req: AuthRequest, res: Response, next: NextFunction
   }
 
   try {
-    const decoded = verifyToken(token);
+    const decoded = verifyAccessToken(token);
     req.user = decoded;
     next();
   } catch (error) {
