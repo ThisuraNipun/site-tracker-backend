@@ -1,10 +1,10 @@
 import { Request, Response } from 'express';
+import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import prisma from '../utils/prisma';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
+import { generateToken } from '../utils/jwt';
+import { sendSuccess, sendError } from '../utils/response';
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -25,7 +25,7 @@ export const register = async (req: Request, res: Response): Promise<void> =>
 
     if (!validationResult.success)
     {
-      res.status(400).json({ success: false, error: validationResult.error.issues[0].message });
+      sendError(res, 400, validationResult.error.issues[0].message);
       return;
     }
 
@@ -34,7 +34,7 @@ export const register = async (req: Request, res: Response): Promise<void> =>
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser)
     {
-      res.status(409).json({ success: false, error: 'User already exists' });
+      sendError(res, 409, 'User already exists');
       return;
     }
 
@@ -56,19 +56,20 @@ export const register = async (req: Request, res: Response): Promise<void> =>
       }
     });
 
-    const token = jwt.sign({ id: user.id, email: user.email, roleId: user.roleId }, JWT_SECRET, { expiresIn: '1d' });
+    const token = generateToken({ id: user.id, email: user.email, roleId: user.roleId });
 
-    res.status(201).json({
-      success: true,
-      data: {
-        user,
-        token
-      }
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
     });
+
+    sendSuccess(res, 201, { user });
   } catch (error)
   {
     console.error('Registration error:', error);
-    res.status(500).json({ success: false, error: 'Failed to register user' });
+    sendError(res, 500, 'Failed to register user');
   }
 };
 
@@ -80,7 +81,7 @@ export const login = async (req: Request, res: Response): Promise<void> =>
 
     if (!validationResult.success)
     {
-      res.status(400).json({ success: false, error: validationResult.error.issues[0].message });
+      sendError(res, 400, validationResult.error.issues[0].message);
       return;
     }
 
@@ -103,46 +104,92 @@ export const login = async (req: Request, res: Response): Promise<void> =>
 
     if (!user)
     {
-      res.status(401).json({ success: false, error: 'Invalid credentials' });
+      sendError(res, 401, 'Invalid credentials');
       return;
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch)
     {
-      res.status(401).json({ success: false, error: 'Invalid credentials' });
+      sendError(res, 401, 'Invalid credentials');
       return;
     }
 
     const userPermissions = user.role?.permissions.map(rp => rp.permission.name) || [];
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        role: user.role?.name,
-        permissions: userPermissions
-      },
-      JWT_SECRET,
-      { expiresIn: '1d' }
-    );
+    const token = generateToken({ 
+      id: user.id, 
+      email: user.email, 
+      role: user.role?.name, 
+      permissions: userPermissions 
+    });
+
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    });
 
     // Exclude passwordHash from response
     const { passwordHash, ...userWithoutPassword } = user;
 
-    res.json({
-      success: true,
-      data: {
-        user: {
-          ...userWithoutPassword,
-          permissions: userPermissions
-        },
-        token
+    sendSuccess(res, 200, {
+      user: {
+        ...userWithoutPassword,
+        permissions: userPermissions
       }
-    });
+    }, 'Login successful!');
   } catch (error)
   {
     console.error('Login error:', error);
-    res.status(500).json({ success: false, error: 'Failed to login user' });
+    sendError(res, 500, 'Failed to login user');
   }
+};
+
+export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      sendError(res, 404, 'User not found');
+      return;
+    }
+
+    const userPermissions = user.role?.permissions.map(rp => rp.permission.name) || [];
+    const { passwordHash, ...userWithoutPassword } = user;
+
+    sendSuccess(res, 200, {
+      ...userWithoutPassword,
+      permissions: userPermissions
+    }, 'User profile retrieved');
+  } catch (error) {
+    console.error('GetMe error:', error);
+    sendError(res, 500, 'Failed to get user profile');
+  }
+};
+
+export const logout = async (req: Request, res: Response): Promise<void> => {
+  res.clearCookie('token');
+  sendSuccess(res, 200, null, 'Logged out successfully');
 };
