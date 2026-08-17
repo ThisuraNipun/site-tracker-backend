@@ -3,7 +3,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 import prisma from '../utils/prisma';
-import { generateToken } from '../utils/jwt';
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { sendSuccess, sendError } from '../utils/response';
 
 const registerSchema = z.object({
@@ -17,14 +17,27 @@ const loginSchema = z.object({
   password: z.string().min(1, 'Password is required')
 });
 
-export const register = async (req: Request, res: Response): Promise<void> =>
-{
-  try
-  {
-    const validationResult = registerSchema.safeParse(req.body);
+const setTokensCookies = (res: Response, accessToken: string, refreshToken: string) => {
+  res.cookie('accessToken', accessToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 15 * 60 * 1000 // 15 minutes
+  });
 
-    if (!validationResult.success)
-    {
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+};
+
+export const register = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const validationResult = registerSchema.safeParse(req.body);
+    
+    if (!validationResult.success) {
       sendError(res, 400, validationResult.error.issues[0].message);
       return;
     }
@@ -32,8 +45,7 @@ export const register = async (req: Request, res: Response): Promise<void> =>
     const { name, email, password } = validationResult.data;
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser)
-    {
+    if (existingUser) {
       sendError(res, 409, 'User already exists');
       return;
     }
@@ -56,31 +68,33 @@ export const register = async (req: Request, res: Response): Promise<void> =>
       }
     });
 
-    const token = generateToken({ id: user.id, email: user.email, roleId: user.roleId });
+    const accessToken = generateAccessToken({ id: user.id, email: user.email, roleId: user.roleId });
+    const refreshToken = generateRefreshToken({ id: user.id });
+    
+    const userAgent = req.headers['user-agent'];
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        device: userAgent,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      }
     });
 
+    setTokensCookies(res, accessToken, refreshToken);
     sendSuccess(res, 201, { user });
-  } catch (error)
-  {
+  } catch (error) {
     console.error('Registration error:', error);
     sendError(res, 500, 'Failed to register user');
   }
 };
 
-export const login = async (req: Request, res: Response): Promise<void> =>
-{
-  try
-  {
+export const login = async (req: Request, res: Response): Promise<void> => {
+  try {
     const validationResult = loginSchema.safeParse(req.body);
 
-    if (!validationResult.success)
-    {
+    if (!validationResult.success) {
       sendError(res, 400, validationResult.error.issues[0].message);
       return;
     }
@@ -101,47 +115,50 @@ export const login = async (req: Request, res: Response): Promise<void> =>
         }
       }
     });
-
-    if (!user)
-    {
+    
+    if (!user) {
       sendError(res, 401, 'Invalid credentials');
       return;
     }
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!isMatch)
-    {
+    if (!isMatch) {
       sendError(res, 401, 'Invalid credentials');
       return;
     }
 
     const userPermissions = user.role?.permissions.map(rp => rp.permission.name) || [];
 
-    const token = generateToken({ 
+    const accessToken = generateAccessToken({ 
       id: user.id, 
       email: user.email, 
       role: user.role?.name, 
       permissions: userPermissions 
     });
+    
+    const refreshToken = generateRefreshToken({ id: user.id });
+    
+    const userAgent = req.headers['user-agent'];
 
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 24 * 60 * 60 * 1000 // 1 day
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        device: userAgent,
+        userId: user.id,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      }
     });
 
-    // Exclude passwordHash from response
-    const { passwordHash, ...userWithoutPassword } = user;
+    setTokensCookies(res, accessToken, refreshToken);
 
+    const { passwordHash, ...userWithoutPassword } = user;
     sendSuccess(res, 200, {
       user: {
         ...userWithoutPassword,
         permissions: userPermissions
       }
     }, 'Login successful!');
-  } catch (error)
-  {
+  } catch (error) {
     console.error('Login error:', error);
     sendError(res, 500, 'Failed to login user');
   }
@@ -190,6 +207,84 @@ export const getMe = async (req: AuthRequest, res: Response): Promise<void> => {
 };
 
 export const logout = async (req: Request, res: Response): Promise<void> => {
-  res.clearCookie('token');
-  sendSuccess(res, 200, null, 'Logged out successfully');
+  try {
+    const refreshToken = req.cookies.refreshToken;
+    if (refreshToken) {
+      await prisma.refreshToken.deleteMany({
+        where: { token: refreshToken }
+      });
+    }
+
+    res.clearCookie('accessToken');
+    res.clearCookie('refreshToken');
+    sendSuccess(res, 200, null, 'Logged out successfully');
+  } catch (error) {
+    console.error('Logout error:', error);
+    sendError(res, 500, 'Failed to logout user');
+  }
+};
+
+export const refreshToken = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const token = req.cookies.refreshToken;
+
+    if (!token) {
+      sendError(res, 401, 'No refresh token provided');
+      return;
+    }
+
+    const decoded = verifyRefreshToken(token) as any;
+
+    const storedToken = await prisma.refreshToken.findUnique({
+      where: { token }
+    });
+
+    if (!storedToken || storedToken.expiresAt < new Date()) {
+      res.clearCookie('accessToken');
+      res.clearCookie('refreshToken');
+      sendError(res, 401, 'Invalid or expired refresh token');
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      include: {
+        role: {
+          include: {
+            permissions: {
+              include: {
+                permission: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!user) {
+      sendError(res, 401, 'User no longer exists');
+      return;
+    }
+
+    const userPermissions = user.role?.permissions.map(rp => rp.permission.name) || [];
+
+    const newAccessToken = generateAccessToken({ 
+      id: user.id, 
+      email: user.email, 
+      role: user.role?.name, 
+      permissions: userPermissions 
+    });
+
+    res.cookie('accessToken', newAccessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 15 * 60 * 1000 // 15 minutes
+    });
+
+    sendSuccess(res, 200, null, 'Token refreshed successfully');
+  } catch (error) {
+    console.error('Refresh token error:', error);
+    sendError(res, 401, 'Invalid refresh token');
+  }
 };

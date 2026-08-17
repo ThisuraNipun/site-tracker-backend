@@ -49,7 +49,20 @@ model User {
   passwordHash String   @map("password_hash") @db.VarChar(255)
   roleId       Int?     @map("role_id")
   role         Role?    @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
   createdAt    DateTime @default(now()) @map("created_at")
 
   @@map("users")
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique @db.VarChar(500)
+  device    String?  @db.VarChar(255)
+  userId    Int      @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("refresh_tokens")
 }

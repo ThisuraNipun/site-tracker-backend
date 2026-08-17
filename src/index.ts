@@ -1,6 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
+import { apiLimiter } from './middlewares/rateLimiter.middleware';
 import authRoutes from './routes/auth.routes';
 import { sendError } from './utils/response';
 
@@ -11,6 +12,9 @@ const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(cookieParser());
+
+// Apply global rate limiter
+app.use('/api', apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
