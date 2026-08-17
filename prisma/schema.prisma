@@ -43,14 +43,16 @@ model RolePermission {
 }
 
 model User {
-  id           Int      @id @default(autoincrement())
-  name         String   @db.VarChar(100)
-  email        String   @unique @db.VarChar(150)
-  passwordHash String   @map("password_hash") @db.VarChar(255)
-  roleId       Int?     @map("role_id")
-  role         Role?    @relation(fields: [roleId], references: [id], onDelete: SetNull)
-  refreshTokens RefreshToken[]
-  createdAt    DateTime @default(now()) @map("created_at")
+  id                   Int      @id @default(autoincrement())
+  name                 String   @db.VarChar(100)
+  email                String   @unique @db.VarChar(150)
+  passwordHash         String   @map("password_hash") @db.VarChar(255)
+  resetPasswordToken   String?  @map("reset_password_token") @db.VarChar(255)
+  resetPasswordExpires DateTime? @map("reset_password_expires")
+  roleId               Int?     @map("role_id")
+  role                 Role?    @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  refreshTokens        RefreshToken[]
+  createdAt            DateTime @default(now()) @map("created_at")
 
   @@map("users")
 }
