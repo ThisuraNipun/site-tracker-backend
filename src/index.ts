@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from 'express';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
 import authRoutes from './routes/auth.routes';
+import { sendError } from './utils/response';
 
 dotenv.config();
 
@@ -8,18 +10,15 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(express.json());
+app.use(cookieParser());
 
 // Routes
 app.use('/api/auth', authRoutes);
 
 // Global Error Handler
-app.use((err: Error, req: Request, res: Response, next: NextFunction) =>
-{
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   console.error(err.stack);
-  res.status(500).json({
-    success: false,
-    error: 'Internal Server Error'
-  });
+  sendError(res, 500, 'Internal Server Error');
 });
 
 app.listen(port, () =>
