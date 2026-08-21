@@ -30,6 +30,16 @@ export const createRole = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
+    if (permissionIds && permissionIds.length > 0) {
+      const validPermissions = await prisma.permission.count({
+        where: { id: { in: permissionIds } }
+      });
+      if (validPermissions !== permissionIds.length) {
+        sendError(res, 400, 'One or more permission IDs are invalid');
+        return;
+      }
+    }
+
     // Prepare permission connections
     const permissionsData = permissionIds?.map(id => ({
       permission: { connect: { id } }
@@ -182,6 +192,16 @@ export const updateRole = async (req: Request, res: Response): Promise<void> => 
       });
       if (nameCheck) {
         sendError(res, 409, 'Role name already exists');
+        return;
+      }
+    }
+
+    if (permissionIds && permissionIds.length > 0) {
+      const validPermissions = await prisma.permission.count({
+        where: { id: { in: permissionIds } }
+      });
+      if (validPermissions !== permissionIds.length) {
+        sendError(res, 400, 'One or more permission IDs are invalid');
         return;
       }
     }

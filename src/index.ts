@@ -5,6 +5,7 @@ import { apiLimiter } from './middlewares/rateLimiter.middleware';
 import authRoutes from './routes/auth.routes';
 import roleRoutes from './routes/role.routes';
 import permissionRoutes from './routes/permission.routes';
+import userRoutes from './routes/user.routes';
 import { sendError } from './utils/response';
 
 dotenv.config();
@@ -22,6 +23,7 @@ app.use('/api', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/roles', roleRoutes);
 app.use('/api/permissions', permissionRoutes);
+app.use('/api/users', userRoutes);
 
 // Global Error Handler
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {

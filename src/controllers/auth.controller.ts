@@ -7,6 +7,7 @@ import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '.
 import { sendSuccess, sendError } from '../utils/response';
 import crypto from 'crypto';
 import { sendEmail } from '../utils/email';
+import { getPasswordResetTemplate, getPasswordChangeSuccessTemplate } from '../utils/emailTemplates';
 
 const registerSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -32,6 +33,12 @@ const changePasswordSchema = z.object({
   oldPassword: z.string().min(1, 'Old password is required'),
   newPassword: z.string().min(6, 'New password must be at least 6 characters')
 });
+
+const updateMeSchema = z.object({
+  name: z.string().min(1, 'Name is required').optional(),
+  phone: z.string().max(20).optional()
+});
+
 
 const setTokensCookies = (res: Response, accessToken: string, refreshToken: string) =>
 {
@@ -369,9 +376,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<void>
 
     await sendEmail({
       to: user.email,
-      subject: 'Password Reset Request',
-      text: `You requested a password reset. Please go to this link to reset your password: ${resetUrl}`,
-      html: `<p>You requested a password reset.</p><p>Click <a href="${resetUrl}">here</a> to reset your password. This link is valid for 5 minutes.</p>`
+      ...getPasswordResetTemplate(resetUrl)
     });
 
     sendSuccess(res, 200, null, 'If that email exists in our system, we have sent a reset link');
@@ -429,9 +434,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<void> 
     // Send email notification
     await sendEmail({
       to: user.email,
-      subject: 'Password Reset Successful',
-      text: 'Your password has been successfully reset.',
-      html: '<p>Your password has been successfully reset.</p>'
+      ...getPasswordChangeSuccessTemplate()
     });
 
     sendSuccess(res, 200, null, 'Password has been reset successfully');
@@ -489,5 +492,50 @@ export const changePassword = async (req: AuthRequest, res: Response): Promise<v
   {
     console.error('Change password error:', error);
     sendError(res, 500, 'Failed to change password');
+  }
+};
+
+
+export const updateMe = async (req: AuthRequest, res: Response): Promise<void> =>
+{
+  try
+  {
+    const userId = req.user?.id;
+    if (!userId)
+    {
+      sendError(res, 401, 'Unauthorized');
+      return;
+    }
+
+    const validationResult = updateMeSchema.safeParse(req.body);
+    if (!validationResult.success)
+    {
+      sendError(res, 400, validationResult.error.issues[0].message);
+      return;
+    }
+
+    const { name, phone } = validationResult.data;
+
+    const existingUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existingUser)
+    {
+      sendError(res, 404, 'User not found');
+      return;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(name !== undefined && { name }),
+        ...(phone !== undefined && { phone })
+      },
+      select: { id: true, name: true, email: true, phone: true, role: { include: { permissions: { include: { permission: true } } } } }
+    });
+
+    sendSuccess(res, 200, { user }, 'Profile updated successfully');
+  } catch (error)
+  {
+    console.error('Update profile error:', error);
+    sendError(res, 500, 'Failed to update profile');
   }
 };
