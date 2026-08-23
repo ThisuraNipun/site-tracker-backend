@@ -10,6 +10,12 @@ export const requirePermissions = (requiredPermissions: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     const userPermissions = req.user?.permissions || [];
 
+    // Super Admin wildcard bypass
+    if (userPermissions.includes('*')) {
+      next();
+      return;
+    }
+
     // Check if user has ALL required permissions
     const hasPermission = requiredPermissions.every(permission => 
       userPermissions.includes(permission)
@@ -31,6 +37,12 @@ export const requirePermissions = (requiredPermissions: string[]) => {
 export const requireAnyPermission = (allowedPermissions: string[]) => {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
     const userPermissions = req.user?.permissions || [];
+
+    // Super Admin wildcard bypass
+    if (userPermissions.includes('*')) {
+      next();
+      return;
+    }
 
     // Check if user has AT LEAST ONE of the allowed permissions
     const hasPermission = allowedPermissions.some(permission => 

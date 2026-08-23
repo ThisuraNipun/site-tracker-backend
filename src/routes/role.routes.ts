@@ -1,23 +1,24 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware';
-import { requirePermissions } from '../middlewares/rbac.middleware';
-import {
-  createRole,
-  getRoles,
-  getRoleById,
-  updateRole,
-  deleteRole
-} from '../controllers/role.controller';
+import { requirePermissions, requireAnyPermission } from '../middlewares/rbac.middleware';
+import
+  {
+    createRole,
+    getRoles,
+    getRoleById,
+    updateRole,
+    deleteRole
+  } from '../controllers/role.controller';
 
 const router = Router();
 
-// All role routes require authentication and 'manage_roles' permission
-router.use(authenticate, requirePermissions(['manage_roles']));
+// All role routes require authentication
+router.use(authenticate);
 
-router.post('/', createRole);
-router.get('/', getRoles);
-router.get('/:id', getRoleById);
-router.put('/:id', updateRole);
-router.delete('/:id', deleteRole);
+router.post('/', requireAnyPermission(['roles:manage', 'roles:create']), createRole);
+router.get('/', requireAnyPermission(['roles:manage', 'roles:view']), getRoles);
+router.get('/:id', requireAnyPermission(['roles:manage', 'roles:view']), getRoleById);
+router.put('/:id', requireAnyPermission(['roles:manage', 'roles:update']), updateRole);
+router.delete('/:id', requireAnyPermission(['roles:manage', 'roles:delete']), deleteRole);
 
 export default router;

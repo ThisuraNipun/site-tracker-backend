@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { authenticate } from '../middlewares/auth.middleware';
-import { requirePermissions } from '../middlewares/rbac.middleware';
+import { requirePermissions, requireAnyPermission } from '../middlewares/rbac.middleware';
 import {
   createPermission,
   getPermissions,
@@ -10,12 +10,12 @@ import {
 
 const router = Router();
 
-// All permission routes require authentication and 'manage_roles' permission
-router.use(authenticate, requirePermissions(['manage_roles']));
+// All permission routes require authentication
+router.use(authenticate);
 
-router.post('/', createPermission);
-router.get('/', getPermissions);
-router.put('/:id', updatePermission);
-router.delete('/:id', deletePermission);
+router.post('/', requireAnyPermission(['permissions:manage', 'permissions:create']), createPermission);
+router.get('/', requireAnyPermission(['permissions:manage', 'permissions:view']), getPermissions);
+router.put('/:id', requireAnyPermission(['permissions:manage', 'permissions:update']), updatePermission);
+router.delete('/:id', requireAnyPermission(['permissions:manage', 'permissions:delete']), deletePermission);
 
 export default router;
